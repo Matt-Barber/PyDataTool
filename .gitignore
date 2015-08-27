@@ -1,0 +1,4 @@
+*.coverage
+
+/userstories.md
+/__pycache__
