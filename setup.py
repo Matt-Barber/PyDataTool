@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(
-    name='DataTools',
+    name='PyDataTool',
     version='0.1',
     description='Tools for querying text data files',
     author='Matt Barber',
