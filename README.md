@@ -12,7 +12,7 @@ The main idea behind this was to create a usable resource to do (currently) two 
 
 ##Example : Statistics
 ```
->>> from datatool.datatool import DataTool
+>>> from datatool import DataTool
 >>> dt = DataTool(filename='./example.csv', terminator=',', encloser='\"')
 >>>
 >>> # Example Statistics query
@@ -36,7 +36,7 @@ The main idea behind this was to create a usable resource to do (currently) two 
 
 ##Example : Query
 ```
->>> from datatool.datatool import DataTool
+>>> from datatool import DataTool
 >>> dt = DataTool(filename='./example.csv', terminator=',', encloser='\"')
 >>>
 >>> dt.query(
