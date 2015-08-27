@@ -1,5 +1,5 @@
 *.coverage
-
+*.pyc
 /userstories.md
 /__pycache__
 /tests/__pycache__
