@@ -201,7 +201,7 @@ class DataTool():
         self.__process_line = self.__process_query
         return self.__process_query(row, where, func)
 
-    def query(self, fields, where, match_all, outfile):
+    def query(self, fields, where, match_all, outfile, insert=False):
         """Executes a query on the datafile tied to the object, and creates a
         new file of the output
 
@@ -239,7 +239,11 @@ class DataTool():
             else:
                 func = any
             with open(self.filename, 'r') as rf:
-                with open(outfile, 'w') as wf:
+                if insert:
+                    handle_type = 'a+'
+                else:
+                    handle_type = 'w'
+                with open(outfile, handle_type) as wf:
                     wf.write(', '.join(fields) + '\n')
                     rf.readline()
                     for line in rf:
@@ -262,3 +266,90 @@ class DataTool():
                             wf.write(write_line + '\n')
 
             return query_result
+
+    def __write_line(self, string_list, write_file):
+        with open(write_file, 'a+') as wf:
+            wf.write(
+                '\n'.join(
+                    string_list
+                )
+            )
+        return True
+
+    def compare(self, **kwargs):
+        with_data = kwargs.get('with_data')
+        field_matches = kwargs.get('field_matches')
+        match_exists = kwargs.get('match_exists')
+        queries = kwargs.get('queries', [])
+        return_data = kwargs.get('return_data', {})
+        outfile = kwargs.get('outfile')
+        result = {
+            'data': {
+                'filename': outfile,
+                'records': 0
+            }
+        }
+        write_lines = []
+        with open(with_data.filename, 'r') as cf:
+            with open(self.filename, 'r') as sf:
+                cf.readline()
+                sf.readline()
+                for c_line in cf:
+                    c_row = converter.convert_to_dict(
+                        data=c_line,
+                        terminator=with_data.terminator,
+                        encloser=with_data.encloser,
+                        headers=with_data.headers
+                    )
+                    sf.seek(0)
+                    for line in sf:
+                        row = converter.convert_to_dict(
+                            data=line,
+                            terminator=self.terminator,
+                            encloser=self.encloser,
+                            headers=self.headers
+                        )
+                        match = all(
+                            c_row[field] == row[field]
+                            for field in field_matches
+                        )
+                        if(
+                            match_exists and not match or
+                            not match_exists and match
+                        ):
+                            continue
+                        query_results = []
+                        for query in queries:
+                            if query['field'] in self.headers.keys():
+                                query_row = row
+                            else:
+                                query_row = c_row
+                            query_results.append(
+                                self.__process_query(
+                                    query_row,
+                                    query,
+                                    all
+                                )
+                            )
+                        if all(query_results):
+                            write_row = {}
+                            for field in return_data:
+                                if field in row.keys():
+                                    write_row[field] = row[field]
+                                else:
+                                    write_row[field] = c_row[field]
+                            write_lines.append(
+                                converter.convert_to_string(
+                                    data=write_row,
+                                    terminator=self.terminator,
+                                    encloser=self.encloser,
+                                    headers = write_row.keys()
+                                )
+                            )
+                            result['data']['records']+=1
+                            if len(write_lines) > 100:
+                                self.__write_line(write_lines, outfile)
+                                write_lines = []
+        self.__write_line(write_lines, outfile)
+                            #write out fields from both rows
+        return result

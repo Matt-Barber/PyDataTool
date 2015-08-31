@@ -1,17 +1,13 @@
 import unittest
+from . import mock_open
 from dateutil.parser import parse
 from ..datatool.config.exceptions import ConditionTypeError, FieldHeaderError
 from ..datatool import DataTool
 from ..datatool import converter
-from unittest.mock import mock_open, patch
+from unittest.mock import patch
 
 
 class TestDataTool(unittest.TestCase):
-    def create_mock_open(self, string):
-        new_mock_open = mock_open(read_data=string)
-        new_mock_open.return_value.__iter__ = lambda self: self
-        new_mock_open.return_value.__next__ = lambda self: self.readline()
-        return new_mock_open
 
     def setUp(self):
         # Example CSV for reads
@@ -23,9 +19,9 @@ class TestDataTool(unittest.TestCase):
             "thor@asgard.com, asgard, red\n"
         )
         # Python3 mock_open doesn't support iteration - emulated
-        self.mock_open = self.create_mock_open(self.csv_example)
+        self.mock_open = mock_open.generate(self.csv_example)
         # Used by stats - needs a reset mock_open
-        self.mock_open_2 = self.create_mock_open(self.csv_example)
+        self.mock_open_2 = mock_open.generate(self.csv_example)
 
         # Example Row
         self.row = converter.convert_to_dict(
