@@ -52,7 +52,7 @@ class DataTool():
             encloser=self.encloser
         )
 
-    def statistics(self, field, search, return_type, top):
+    def statistics(self, field, search, return_type):
         """ Calculates statistics for the data file provided during
         instantiation
 
@@ -65,7 +65,6 @@ class DataTool():
         }
         :param result, a character to determine how to calculate the result,
         currently either %  for percent, or # for numeric
-        :param top, an integer, how many results to show, group the others
         :rtype dictionary
         """
         stats = {'data': {}}
@@ -73,9 +72,9 @@ class DataTool():
             regex = re.compile(search['regex'])
         except:
             regex = re.compile('.*')
-        with open(self.filename, 'r') as f:
-            f.readline()
-            for row_number, line in enumerate(f):
+        with open(self.filename, 'r') as fp:
+            fp.readline()
+            for row_number, line in enumerate(fp):
                 row = converter.convert_to_dict(
                     data=line,
                     terminator=self.terminator,
@@ -89,7 +88,7 @@ class DataTool():
                 # rewrite this......
                 regex_result = regex.search(value)
                 if regex_result is not None:
-                    if ('group_idx' in search.keys() and regex_result.groups() is not None):
+                    if 'group_idx' in search.keys() and regex_result.groups() is not None:
                         result = regex_result.groups()[search['group_idx']]
                     elif regex_result.group() is not None:
                         result = regex_result.group()
@@ -100,7 +99,7 @@ class DataTool():
                             result, 0
                         ) + 1
 
-        if return_type == '%':
+        if return_type is '%':
             stats['data'].update(
                 {
                     k: v*(100/(row_number+1))
@@ -121,11 +120,12 @@ class DataTool():
         }
         :rtype boolean
         """
-        if isinstance(queries, dict):
-            queries = [queries]
+        queries = [queries] if not isinstance(queries, list) else queries
         def test(field, condition, value):
-            data = row[field]
-            data = parse(data) if condition in ('BEFORE','AFTER') else data
+            data = (
+                parse(row[field]) if condition in ('BEFORE', 'AFTER')
+                else row[field]
+            )
             return self.CONDITIONS[condition](data, value)
         query_results = map(lambda query: test(**query), [query for query in queries])
         return func(query_results)
@@ -146,21 +146,15 @@ class DataTool():
         """
         field = query.get('field')
         condition = query.get('condition')
-        if condition not in self.CONDITIONS.keys():
+        if condition not in self.CONDITIONS:
             raise ValueError(
                 'condition must be one of '.format(
-                    ', '.join(self.CONDITIONS.keys())
+                    ', '.join(self.CONDITIONS)
                 )
             )
-        elif (
-            condition in ('GREATER', 'LESS') and
-            data_types.get(field) != 'numeric'
-        ):
+        elif condition in ('GREATER', 'LESS') and data_types.get(field) != 'numeric':
             raise ConditionTypeError('numeric', ['GREATER', 'LESS'])
-        elif (
-            condition in ('BEFORE', 'AFTER') and
-            data_types.get(field) != 'date'
-        ):
+        elif condition in ('BEFORE', 'AFTER') and data_types.get(field) != 'date':
             raise ConditionTypeError('datetime', ['BEFORE', 'AFTER'])
         else:
             return True
@@ -196,14 +190,19 @@ class DataTool():
 
         :rtype dictionary of filename and records affected
         """
-        where = [where] if isinstance(where, dict) else where
-        is_valid_field = lambda field: field in self.headers.keys()
+        is_valid_field = lambda field: field in self.headers
         if not all(map(is_valid_field, (f for f in fields))):
-            raise FieldHeaderError(fields, self.headers.keys())
+            raise FieldHeaderError(fields, self.headers)
+        where = [where] if isinstance(where, dict) else where
+        row_struct = {
+            'terminator': self.terminator,
+            'encloser' : self.encloser,
+            'headers' : self.headers
+        }
         for query in where:
             field = query.get('field')
             if not is_valid_field(field):
-                raise FieldHeaderError([field], self.headers.keys())
+                raise FieldHeaderError([field], self.headers)
             query['condition'] = query.get('condition').upper()
             try:
                 query['value'] = parse(query.get('value'))
@@ -214,103 +213,116 @@ class DataTool():
         write_lines = []
         with open(self.filename, 'r') as rf:
             handle_type = 'a+' if insert else 'w'
-            if handle_type == 'w':
+            if handle_type is 'w':
                 write_lines.append(', '.join(fields))
-                rf.readline()
-                for line in rf:
-                    row = converter.convert_to_dict(
-                        data=line,
-                        terminator=self.terminator,
-                        encloser=self.encloser,
-                        headers=self.headers
+            rf.readline()
+            for line in rf:
+                row = converter.convert_to_dict(data=line, **row_struct)
+                if self.__process_line(row, where, func):
+                    result = {field: row[field] for field in fields}
+                    query_result['data']['records'] += 1
+                    write_lines.append(
+                        converter.convert_to_string(data=result, **row_struct)
                     )
-                    if self.__process_line(row, where, func):
-                        result = {field: row[field] for field in fields}
-                        query_result['data']['records'] += 1
-                        write_lines.append(
-                            converter.convert_to_string(
-                                data=result,
-                                terminator=',',
-                                encloser='\"',
-                                headers=[]
-                            )
-                        )
-                    if len(write_lines) > 100:
-                        self.__write_line(write_lines, outfile)
-                        write_lines = []
-            self.__write_line(write_lines, outfile)
-            return query_result
+                if len(write_lines) > 100:
+                    self.__write_line(write_lines, outfile)
+                    write_lines = []
+        self.__write_line(write_lines, outfile)
+        return query_result
 
     def __write_line(self, string_list, write_file):
         with open(write_file, 'a+') as wf:
             wf.write('\n'.join(string_list))
         return True
 
-    def compare(
-        self,
-        with_data,
-        field_matches,
-        match_exists,
-        queries,
-        return_data,
-        outfile
-    ):
+    def __process_compare(self, source_row, compare_row, match_fields, should_match):
+        matched_data = all(
+            source_row[field] == compare_row[field]
+            for field in match_fields
+        )
+        return (
+            True if matched_data and should_match
+            or not matched_data and not should_match
+            else False
+        )
+
+    def compare(self, with_data, field_matches, match_exists, queries, return_data, outfile):
+        """Takes in another DataTool object as with data and executes a compare
+        between the two, where a set of fields match, and given a query across
+        these.
+
+        :param with_data, a DataTool object to compare against
+        :param field_matches, a list of fields to match on between the 2 DataTool
+        objects (i.e. if both contain email you'd use ['email'])
+        :param match_exists, a boolean either matching or non matching comparison
+        :param queries, a list of dictionaries representing queries to run on the
+        found data
+        :param return_data, a list of fields to return, must exist in either
+        the source or the compare CSV
+        :param outfile, a string of a destination to write the output to
+
+        :rtype dictionary of filename and records affected
+        """
         result = {'data': {'filename': outfile, 'records': 0}}
         write_lines = []
+        c_data = {
+            'terminator': with_data.terminator,
+            'encloser': with_data.encloser,
+            'headers': with_data.headers
+        }
+        s_data = {
+            'terminator': self.terminator,
+            'encloser': self.encloser,
+            'headers': self.headers
+        }
+
         with open(with_data.filename, 'r') as cf:
             with open(self.filename, 'r') as sf:
                 cf.readline()
                 sf.readline()
                 for c_line in cf:
-                    c_row = converter.convert_to_dict(
-                        data=c_line,
-                        terminator=with_data.terminator,
-                        encloser=with_data.encloser,
-                        headers=with_data.headers
-                    )
-                    sf.seek(0)
+                    c_row = converter.convert_to_dict(data=c_line, **c_data)
+                    sf.seek(0)  # Reset the source file
                     for line in sf:
-                        row = converter.convert_to_dict(
-                            data=line,
-                            terminator=self.terminator,
-                            encloser=self.encloser,
-                            headers=self.headers
-                        )
-                        match = all(
-                            c_row[field] == row[field]
-                            for field in field_matches
-                        )
-                        if(match_exists and not match or
-                            not match_exists and match):
+
+                        row = converter.convert_to_dict(data=line, **s_data)
+                        if not self.__process_compare(row, c_row, field_matches, match_exists):
                             continue
-                        get_query_row = (
-                            lambda query:
-                            row if query['field'] in self.headers.keys()
-                            else c_row
+
+                        # AND the query results
+                        query_result = all(
+                            [
+                                self.__process_query(
+                                    # select the row based on where the field is
+                                    row=(
+                                        row if query['field'] in self.headers
+                                        else c_row
+                                    ),
+                                    queries=query
+                                )
+                                for query in queries
+                            ]
                         )
-                        query_results = [
-                            self.__process_query(get_query_row(query), query, all)
-                            for query in queries
-                        ]
-                        if all(query_results):
-                            get_row_val = (
-                                lambda f:
-                                row[f] if f in row.keys()
-                                else c_row[f]
-                            )
+                        if query_result:
+                            # Create the dictionary from the two rows and return fields
                             write_row = {
-                                field:get_row_val(field)
+                                field:(
+                                    row[field] if field in row
+                                    else c_row
+                                )
                                 for field in return_data
                             }
+                            write_data = {
+                                'data': write_row,
+                                'terminator': self.terminator,
+                                'encloser': self.encloser,
+                                'headers': write_row
+                            }
+                            # Add them to the write lines list buffer
                             write_lines.append(
-                                converter.convert_to_string(
-                                    data=write_row,
-                                    terminator=self.terminator,
-                                    encloser=self.encloser,
-                                    headers = write_row.keys()
-                                )
+                                converter.convert_to_string(**write_data)
                             )
-                            result['data']['records']+=1
+                            result['data']['records'] += 1
 
                             if len(write_lines) > 100:
                                 self.__write_line(write_lines, outfile)

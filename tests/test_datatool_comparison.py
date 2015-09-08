@@ -37,15 +37,15 @@ class TestDataToolComparison(unittest.TestCase):
         with patch('os.path.exists', return_value=True):
             with patch('builtins.open', return_value=StringIO(self.csv_a)):
                 self.source_data = DataTool(
-                    filename = 'path/to/source',
-                    terminator = ',',
-                    encloser = '\"'
+                    filename='path/to/source',
+                    terminator=',',
+                    encloser='\"'
                 )
             with patch('builtins.open', return_value=StringIO(self.csv_b)):
                 self.compare_data = DataTool(
-                    filename = 'path/to/compare',
-                    terminator = '\t',
-                    encloser = '\"'
+                    filename='path/to/compare',
+                    terminator='\t',
+                    encloser='\"'
                 )
 
     def test_datatool_comparison_returns_new_data_file(self):

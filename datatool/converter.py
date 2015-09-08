@@ -17,8 +17,8 @@ def get_data_format_rules(func):
             )
         terminator = kwargs.get('terminator', ',')
         encloser = kwargs.get('encloser', '\"')
-        if type(data) != str:
-            headers = list(data.keys())
+        if not isinstance(data, str):
+            headers = list(data)
         else:
             headers = kwargs.get('headers', False)
         if not headers:
@@ -37,10 +37,11 @@ def get_data_format_rules(func):
 
 
 def get_indexes(data, terminator, encloser):
-    values = list(csv.reader(
-        [data],
-        delimiter=terminator,
-        quotechar=encloser
+    values = list(
+        csv.reader(
+            [data],
+            delimiter=terminator,
+            quotechar=encloser
         )
     ).pop()
     indexed_data = {
@@ -88,7 +89,7 @@ def convert_to_dict(data, terminator, encloser, headers):
 
 
 @get_data_format_rules
-def convert_to_string(data, terminator, encloser, headers):
+def convert_to_string(data, terminator, encloser, headers=None):
     """Converts dict to a string
 
     :param data: An dict of key value pairs that make up the dictionary
@@ -119,10 +120,10 @@ def convert_to_types(converted_dict):
         try:
             parse(value)
             type_dict[key] = 'date'
-        except ValueError as ve:
+        except ValueError:
             try:
                 float(value)
                 type_dict[key] = 'numeric'
-            except ValueError as ve:
+            except ValueError:
                 type_dict[key] = 'string'
     return type_dict
