@@ -9,29 +9,21 @@ class DataTool():
     headers = {}
     CONDITIONS = {
         'CONTAINS':
-            lambda value, match_value:
-                value.rfind(match_value) != -1,
+            lambda value, match_value: value.rfind(match_value) != -1,
         'EQUALS':
-            lambda value, match_value:
-                value == match_value,
+            lambda value, match_value: value == match_value,
         'GREATER':
-            lambda value, match_value:
-                value > match_value,
+            lambda value, match_value: value > match_value,
         'LESS':
-            lambda value, match_value:
-                value < match_value,
+            lambda value, match_value: value < match_value,
         'BEFORE':
-            lambda value, match_value:
-                value < match_value,
+            lambda value, match_value: value < match_value,
         'AFTER':
-            lambda value, match_value:
-                value > match_value,
+            lambda value, match_value: value > match_value,
         'BETWEEN':
-            lambda value, match_value:
-                True,
+            lambda value, match_value: True,
         'NOT':
-            lambda value, match_value:
-                value != match_value
+            lambda value, match_value: value != match_value
     }
 
     def __init__(self, **kwargs):
@@ -49,7 +41,7 @@ class DataTool():
         except:
             raise AttributeError('Filename kwarg must be provided')
         if not os.path.exists(self.filename):
-            raise AttributeError('File must exist')
+            raise AttributeError('{} must exist'.format(self.filename))
         self.terminator = kwargs.get('terminator', ',')
         self.encloser = kwargs.get('encloser', '\"')
         with open(self.filename, 'r') as f:
@@ -80,7 +72,7 @@ class DataTool():
         try:
             regex = re.compile(search['regex'])
         except:
-            raise TypeError('Regex must be supplied as a string / pattern')
+            regex = re.compile('.*')
         with open(self.filename, 'r') as f:
             f.readline()
             for row_number, line in enumerate(f):
@@ -97,10 +89,7 @@ class DataTool():
                 # rewrite this......
                 regex_result = regex.search(value)
                 if regex_result is not None:
-                    if (
-                        'group_idx' in search.keys() and
-                        regex_result.groups() is not None
-                    ):
+                    if ('group_idx' in search.keys() and regex_result.groups() is not None):
                         result = regex_result.groups()[search['group_idx']]
                     elif regex_result.group() is not None:
                         result = regex_result.group()
@@ -134,17 +123,11 @@ class DataTool():
         """
         if isinstance(queries, dict):
             queries = [queries]
-        query_results = []
-        # Local variables are looked up quicker than global
-        query_results_append = query_results.append
-        for query in queries:
-            condition = query.get('condition')
-            field = query.get('field')
-            if condition in ('BEFORE', 'AFTER'):
-                row[field] = parse(row[field])  # bottle neck
-            query_results_append(
-                self.CONDITIONS[condition](row[field], query.get('value'))
-            )
+        def test(field, condition, value):
+            data = row[field]
+            data = parse(data) if condition in ('BEFORE','AFTER') else data
+            return self.CONDITIONS[condition](data, value)
+        query_results = map(lambda query: test(**query), [query for query in queries])
         return func(query_results)
 
     def __validate_query(self, data_types, query):
@@ -213,82 +196,66 @@ class DataTool():
 
         :rtype dictionary of filename and records affected
         """
-
-        if isinstance(where, dict):
-            where = [where]
-        valid_return_fields = set(fields).issubset(set(self.headers.keys()))
-        query_fields = []
+        where = [where] if isinstance(where, dict) else where
+        is_valid_field = lambda field: field in self.headers.keys()
+        if not all(map(is_valid_field, (f for f in fields))):
+            raise FieldHeaderError(fields, self.headers.keys())
         for query in where:
+            field = query.get('field')
+            if not is_valid_field(field):
+                raise FieldHeaderError([field], self.headers.keys())
             query['condition'] = query.get('condition').upper()
             try:
                 query['value'] = parse(query.get('value'))
             except:
                 pass
-            query_fields.append(query.get('field'))
-        valid_query_fields = set(query_fields).issubset(
-            set(self.headers.keys())
-        )
-        if not valid_return_fields:
-            raise FieldHeaderError(fields, self.headers.keys())
-        elif not valid_query_fields:
-            raise FieldHeaderError(query_fields, self.headers.keys())
-        else:
-            query_result = {'data': {'filename': outfile, 'records': 0}}
-            if match_all:
-                func = all
-            else:
-                func = any
-            with open(self.filename, 'r') as rf:
-                if insert:
-                    handle_type = 'a+'
-                else:
-                    handle_type = 'w'
-                with open(outfile, handle_type) as wf:
-                    wf.write(', '.join(fields) + '\n')
-                    rf.readline()
-                    for line in rf:
-                        row = converter.convert_to_dict(
-                            data=line,
-                            terminator=self.terminator,
-                            encloser=self.encloser,
-                            headers=self.headers
-                        )
-                        if self.__process_line(row, where, func):
-                            result = {}
-                            result = {field: row[field] for field in fields}
-                            query_result['data']['records'] += 1
-                            write_line = converter.convert_to_string(
+        query_result = {'data': {'filename': outfile, 'records': 0}}
+        func = all if match_all else any
+        write_lines = []
+        with open(self.filename, 'r') as rf:
+            handle_type = 'a+' if insert else 'w'
+            if handle_type == 'w':
+                write_lines.append(', '.join(fields))
+                rf.readline()
+                for line in rf:
+                    row = converter.convert_to_dict(
+                        data=line,
+                        terminator=self.terminator,
+                        encloser=self.encloser,
+                        headers=self.headers
+                    )
+                    if self.__process_line(row, where, func):
+                        result = {field: row[field] for field in fields}
+                        query_result['data']['records'] += 1
+                        write_lines.append(
+                            converter.convert_to_string(
                                 data=result,
                                 terminator=',',
                                 encloser='\"',
                                 headers=[]
                             )
-                            wf.write(write_line + '\n')
-
+                        )
+                    if len(write_lines) > 100:
+                        self.__write_line(write_lines, outfile)
+                        write_lines = []
+            self.__write_line(write_lines, outfile)
             return query_result
 
     def __write_line(self, string_list, write_file):
         with open(write_file, 'a+') as wf:
-            wf.write(
-                '\n'.join(
-                    string_list
-                )
-            )
+            wf.write('\n'.join(string_list))
         return True
 
-    def compare(self, **kwargs):
-        with_data = kwargs.get('with_data')
-        field_matches = kwargs.get('field_matches')
-        match_exists = kwargs.get('match_exists')
-        queries = kwargs.get('queries', [])
-        return_data = kwargs.get('return_data', {})
-        outfile = kwargs.get('outfile')
-        result = {
-            'data': {
-                'filename': outfile,
-                'records': 0
-            }
-        }
+    def compare(
+        self,
+        with_data,
+        field_matches,
+        match_exists,
+        queries,
+        return_data,
+        outfile
+    ):
+        result = {'data': {'filename': outfile, 'records': 0}}
         write_lines = []
         with open(with_data.filename, 'r') as cf:
             with open(self.filename, 'r') as sf:
@@ -313,31 +280,28 @@ class DataTool():
                             c_row[field] == row[field]
                             for field in field_matches
                         )
-                        if(
-                            match_exists and not match or
-                            not match_exists and match
-                        ):
+                        if(match_exists and not match or
+                            not match_exists and match):
                             continue
-                        query_results = []
-                        for query in queries:
-                            if query['field'] in self.headers.keys():
-                                query_row = row
-                            else:
-                                query_row = c_row
-                            query_results.append(
-                                self.__process_query(
-                                    query_row,
-                                    query,
-                                    all
-                                )
-                            )
+                        get_query_row = (
+                            lambda query:
+                            row if query['field'] in self.headers.keys()
+                            else c_row
+                        )
+                        query_results = [
+                            self.__process_query(get_query_row(query), query, all)
+                            for query in queries
+                        ]
                         if all(query_results):
-                            write_row = {}
-                            for field in return_data:
-                                if field in row.keys():
-                                    write_row[field] = row[field]
-                                else:
-                                    write_row[field] = c_row[field]
+                            get_row_val = (
+                                lambda f:
+                                row[f] if f in row.keys()
+                                else c_row[f]
+                            )
+                            write_row = {
+                                field:get_row_val(field)
+                                for field in return_data
+                            }
                             write_lines.append(
                                 converter.convert_to_string(
                                     data=write_row,
@@ -347,9 +311,9 @@ class DataTool():
                                 )
                             )
                             result['data']['records']+=1
+
                             if len(write_lines) > 100:
                                 self.__write_line(write_lines, outfile)
                                 write_lines = []
         self.__write_line(write_lines, outfile)
-                            #write out fields from both rows
         return result

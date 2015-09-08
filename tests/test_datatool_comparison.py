@@ -61,7 +61,7 @@ class TestDataToolComparison(unittest.TestCase):
             with patch('builtins.open', side_effect=self.compare_side_effect):
                 result = self.source_data.compare(
                     with_data=self.compare_data,
-                    data_matches=True,
+                    match_exists=True,
                     field_matches=['email'],
                     queries=queries,
                     return_data=return_fields,

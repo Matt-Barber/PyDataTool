@@ -4,3 +4,5 @@
 /__pycache__
 /tests/__pycache__
 /datatool/__pycache__
+/datatool/__pycache__
+nosetests.json
